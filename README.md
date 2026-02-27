@@ -1,4 +1,4 @@
-<![CDATA[<div align="center">
+<div align="center">
 
 # 🏥 Qliniq
 ### Smart Clinic Management System
@@ -372,4 +372,3 @@ Made with ❤️ by [Ashraful Kabir](https://github.com/AshrafulKabir7)
 **[⬆ Back to Top](#-qliniq)**
 
 </div>
-]]>
