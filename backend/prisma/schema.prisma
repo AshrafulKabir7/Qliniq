@@ -1,0 +1,260 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlanStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum Role {
+  SUPER_ADMIN
+  CLINIC_ADMIN
+  RECEPTIONIST
+  DOCTOR
+  PATIENT
+  KIOSK_VIEW
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  NO_SHOW
+  COMPLETED
+}
+
+enum AppointmentSource {
+  MOBILE
+  WALK_IN
+  ADMIN
+  WHATSAPP
+}
+
+enum TokenPriority {
+  NORMAL
+  EMERGENCY
+  VIP
+}
+
+enum TokenStatus {
+  WAITING
+  CALLED
+  IN_SERVICE
+  DONE
+  SKIPPED
+}
+
+model Tenant {
+  id         String     @id @default(uuid())
+  name       String
+  plan       String     @default("FREE")
+  status     PlanStatus @default(ACTIVE)
+  created_at DateTime   @default(now())
+  updated_at DateTime   @updatedAt
+
+  clinics        Clinic[]
+  users          User[]
+  services       Service[]
+  schedules      DoctorSchedule[]
+  time_offs      DoctorTimeOff[]
+  appointments   Appointment[]
+  queue_tokens   QueueToken[]
+  notifications  Notification[]
+  audit_logs     AuditLog[]
+}
+
+model Clinic {
+  id         String   @id @default(uuid())
+  tenant_id  String
+  name       String
+  address    String?
+  phone      String?
+  timezone   String   @default("UTC")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  tenant         Tenant           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  doctorProfiles DoctorProfile[]
+  services       Service[]
+  schedules      DoctorSchedule[]
+  appointments   Appointment[]
+  queue_tokens   QueueToken[]
+}
+
+model User {
+  id            String   @id @default(uuid())
+  tenant_id     String
+  role          Role     @default(PATIENT)
+  name          String
+  phone         String?  @unique
+  email         String?  @unique
+  password_hash String?
+  status        String   @default("ACTIVE")
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  doctorProfile  DoctorProfile?
+  patientProfile PatientProfile?
+
+  doctorSchedules DoctorSchedule[] @relation("DoctorSchedules")
+  doctorTimeOffs  DoctorTimeOff[]  @relation("DoctorTimeOffs")
+  
+  patientAppointments Appointment[] @relation("PatientAppointments")
+  doctorAppointments  Appointment[] @relation("DoctorAppointments")
+  doctorTokens        QueueToken[]  @relation("DoctorTokens")
+
+  notifications Notification[]
+  auditLogs     AuditLog[]
+}
+
+model DoctorProfile {
+  user_id                   String  @id
+  clinic_id                 String
+  specialty                 String?
+  room_no                   String?
+  fee                       Decimal @db.Decimal(10, 2) @default(0.00)
+  average_consultation_time Int     @default(15) // Minutes
+  color_code                String?
+
+  user   User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  clinic Clinic @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+}
+
+model PatientProfile {
+  user_id String    @id
+  dob     DateTime?
+  gender  String?
+  address String?
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model Service {
+  id           String   @id @default(uuid())
+  tenant_id    String
+  clinic_id    String
+  name         String
+  duration_min Int      @default(15)
+  status       String   @default("ACTIVE")
+
+  tenant       Tenant  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  clinic       Clinic  @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+}
+
+model DoctorSchedule {
+  id                  String @id @default(uuid())
+  tenant_id           String
+  clinic_id           String
+  doctor_user_id      String
+  day_of_week         Int    // 0 = Sunday, 1 = Monday, etc.
+  start_time          String // e.g. "09:00"
+  end_time            String // e.g. "17:00"
+  slot_duration_min   Int    @default(15)
+  max_tokens_per_slot Int?   @default(1)
+
+  tenant        Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  clinic        Clinic @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  doctor        User   @relation("DoctorSchedules", fields: [doctor_user_id], references: [id], onDelete: Cascade)
+}
+
+model DoctorTimeOff {
+  id             String   @id @default(uuid())
+  tenant_id      String
+  doctor_user_id String
+  date           DateTime @db.Date // YYYY-MM-DD
+  start_time     String
+  end_time       String
+  reason         String?
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  doctor User   @relation("DoctorTimeOffs", fields: [doctor_user_id], references: [id], onDelete: Cascade)
+}
+
+model Appointment {
+  id               String            @id @default(uuid())
+  tenant_id        String
+  clinic_id        String
+  patient_user_id  String
+  doctor_user_id   String
+  service_id       String
+  appointment_date DateTime          @db.Date
+  slot_start       String
+  slot_end         String
+  status           AppointmentStatus @default(PENDING)
+  source           AppointmentSource @default(MOBILE)
+  notes            String?
+  check_in_time    DateTime?
+  tracking_uuid    String?           @unique @default(uuid())
+  created_at       DateTime          @default(now())
+  updated_at       DateTime          @updatedAt
+
+  tenant     Tenant    @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  clinic     Clinic    @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  patient    User      @relation("PatientAppointments", fields: [patient_user_id], references: [id], onDelete: Cascade)
+  doctor     User      @relation("DoctorAppointments", fields: [doctor_user_id], references: [id], onDelete: Cascade)
+  service    Service   @relation(fields: [service_id], references: [id])
+  queueToken QueueToken?
+}
+
+model QueueToken {
+  id                       String        @id @default(uuid())
+  tenant_id                String
+  clinic_id                String
+  doctor_user_id           String
+  appointment_id           String?       @unique // Nullable for pure walk-ins that don't need appt overhead
+  queue_date               DateTime      @db.Date
+  token_number             Int
+  priority                 TokenPriority @default(NORMAL)
+  status                   TokenStatus   @default(WAITING)
+  estimated_wait_time_mins Int?          
+  called_at                DateTime?
+  served_at                DateTime?
+  ended_at                 DateTime?
+  created_at               DateTime      @default(now())
+
+  tenant      Tenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  clinic      Clinic       @relation(fields: [clinic_id], references: [id], onDelete: Cascade)
+  doctor      User         @relation("DoctorTokens", fields: [doctor_user_id], references: [id], onDelete: Cascade)
+  appointment Appointment? @relation(fields: [appointment_id], references: [id], onDelete: SetNull)
+
+  @@unique([tenant_id, clinic_id, doctor_user_id, queue_date, token_number])
+}
+
+model Notification {
+  id           String    @id @default(uuid())
+  tenant_id    String
+  user_id      String
+  type         String
+  channel      String    @default("PUSH") // PUSH, SMS, EMAIL
+  payload_json String
+  status       String    @default("PENDING") // PENDING, SENT, FAILED
+  scheduled_at DateTime?
+  sent_at      DateTime?
+  created_at   DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  tenant_id     String
+  actor_user_id String
+  action        String
+  entity_type   String
+  entity_id     String
+  metadata_json String?
+  created_at    DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  actor  User   @relation(fields: [actor_user_id], references: [id], onDelete: SetNull)
+}
